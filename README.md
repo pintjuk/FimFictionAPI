@@ -11,7 +11,7 @@ Dependencies:
 
 All of them are on maven.
 
-I am trying to remove most dependencies right now. HTML parsing has mostly been replaced by my own parser, YXML (https://github.com/yawkat/YXML). The lexer is needed too.
+This is at the moment identical to yawkats version 851b9e70dee68d57a3b0fe6544e64295c8414467
 
 Code Style:
 -----------
