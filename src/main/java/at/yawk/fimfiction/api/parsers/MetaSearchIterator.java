@@ -1,15 +1,10 @@
 package at.yawk.fimfiction.api.parsers;
 
-import java.net.URLConnection;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 import org.apache.commons.lang.StringEscapeUtils;
-import org.htmlparser.Node;
-import org.htmlparser.lexer.Lexer;
-import org.htmlparser.nodes.TagNode;
-import org.htmlparser.nodes.TextNode;
 import at.yawk.fimfiction.api.Category;
 import at.yawk.fimfiction.api.Chapter;
 import at.yawk.fimfiction.api.Character;
@@ -25,20 +20,11 @@ import at.yawk.fimfiction.api.immutable.SimpleAuthor;
 import at.yawk.fimfiction.api.immutable.SimpleChapter;
 import at.yawk.fimfiction.api.immutable.SimpleIdentifier;
 import at.yawk.fimfiction.api.immutable.SimpleStoryAccess;
+import at.yawk.yxml.Lexer;
 
-public class MetaSearchIterator extends SearchIterator<StoryAccess<VisibleStoryMeta>> {
+public class MetaSearchIterator extends XMLSearchIterator<StoryAccess<VisibleStoryMeta>> {
     public MetaSearchIterator(String request, InternetAccess internet) {
         super(request, internet);
-    }
-    
-    @Override
-    protected StoryAccess<VisibleStoryMeta>[] getNextBlock(URLConnection url) {
-        try {
-            return getNextBlock(new Lexer(url));
-        } catch(Exception e) {
-            e.printStackTrace();
-        }
-        return null;
     }
     
     @SuppressWarnings("unchecked")
@@ -46,56 +32,58 @@ public class MetaSearchIterator extends SearchIterator<StoryAccess<VisibleStoryM
         final List<StoryAccess<VisibleStoryMeta>> stories = new ArrayList<StoryAccess<VisibleStoryMeta>>();
         StoryMetaFactory currentStory = null;
         Identifier currentStoryId = null;
-        Node n;
         boolean awaitingTitle = false;
         boolean awaitingAuthor = false;
-        while((n = reader.nextNode()) != null) {
+        while(reader.getNext()) {
             if(currentStory == null) {
-                if(n instanceof TagNode && !((TagNode)n).isEndTag() && ((TagNode)n).getTagName().equals("DIV") && "content_box post_content_box".equals(((TagNode)n).getAttribute("class"))) {
+                if(reader.isTag() && !reader.isEndTagOnly() && reader.getLowercaseTagName().equals("div") && "content_box post_content_box".equals(reader.getAttribute("class"))) {
                     currentStory = new StoryMetaFactory();
                     currentStory.setCommentAmount(-1);
                 }
             } else {
-                if(n instanceof TagNode) {
-                    final TagNode tn = (TagNode)n;
-                    if(!((TagNode)n).isEndTag()) {
-                        if(tn.getTagName().equals("DIV") && "story_stats".equals(tn.getAttribute("class"))) {
+                if(reader.isTag()) {
+                    if(!reader.isEndTagOnly()) {
+                        if(reader.getLowercaseTagName().equals("div"))
+                            System.out.println(reader.getAttribute("class"));
+                        if(reader.getLowercaseTagName().equals("div") && "story_stats".equals(reader.getAttribute("class"))) {
                             stories.add(new SimpleStoryAccess<VisibleStoryMeta>(currentStoryId, currentStory));
                             currentStory = null;
                             currentStoryId = null;
                         } else {
                             if(awaitingTitle) {
-                                if(tn.getTagName().equals("A") && tn.getAttribute("id") == null) {
-                                    final String partHref = ((TagNode)n).getAttribute("href").substring(7);
+                                if(reader.getLowercaseTagName().equals("a") && reader.getAttribute("id") == null) {
+                                    final String partHref = reader.getAttribute("href").substring(7);
                                     currentStoryId = new SimpleIdentifier(Integer.parseInt(partHref.substring(0, partHref.indexOf('/'))));
-                                    currentStory.setTitle(StringEscapeUtils.unescapeHtml(reader.nextNode().getText()));
+                                    reader.getNext();
+                                    currentStory.setTitle(StringEscapeUtils.unescapeHtml(reader.getCurrentElementContent().trim()));
                                     awaitingTitle = false;
                                     awaitingAuthor = true;
                                 }
-                            } else if(tn.getTagName().equals("H2")) {
+                            } else if(reader.getLowercaseTagName().equals("h2")) {
                                 awaitingTitle = true;
                             } else if(awaitingAuthor) {
-                                if(tn.getTagName().equals("A")) {
-                                    currentStory.setAuthor(new SimpleAuthor(0, reader.nextNode().getText()));
+                                if(reader.getLowercaseTagName().equals("a")) {
+                                    reader.getNext();
+                                    currentStory.setAuthor(new SimpleAuthor(0, reader.getCurrentElementContent()));
                                     awaitingAuthor = false;
                                 }
-                            } else if(tn.getTagName().equals("DIV") && "description".equals(tn.getAttribute("class"))) {
+                            } else if(reader.getLowercaseTagName().equals("div") && "description".equals(reader.getAttribute("class"))) {
                                 currentStory.setDescription("");
-                                while(!((n = reader.nextNode()) instanceof TagNode) || !((TagNode)n).isEndTag() || !"DIV".equals(((TagNode)n).getTagName())) {
+                                while(reader.getNext() && (!reader.isTag() || !reader.isEndTagOnly() || !"div".equals(reader.getLowercaseTagName()))) {
                                     final String s;
-                                    if(n instanceof TagNode) {
-                                        if(((TagNode)n).getTagName().equals("P")) {
-                                            if(((TagNode)n).isEndTag() || "double".equals(((TagNode)n).getAttribute("class")))
+                                    if(reader.isTag()) {
+                                        if(reader.getLowercaseTagName().equals("p")) {
+                                            if(reader.isEndTagOnly() || "double".equals(reader.getAttribute("class")))
                                                 s = "\n";
                                             else
                                                 s = "";
-                                        } else if(((TagNode)n).getTagName().equals("B")) {
-                                            if(((TagNode)n).isEndTag())
+                                        } else if(reader.getLowercaseTagName().equals("b")) {
+                                            if(reader.isEndTagOnly())
                                                 s = "[/b]";
                                             else
                                                 s = "[b]";
-                                        } else if(((TagNode)n).getTagName().equals("I")) {
-                                            if(((TagNode)n).isEndTag())
+                                        } else if(reader.getLowercaseTagName().equals("i")) {
+                                            if(reader.isEndTagOnly())
                                                 s = "[/i]";
                                             else
                                                 s = "[i]";
@@ -103,36 +91,39 @@ public class MetaSearchIterator extends SearchIterator<StoryAccess<VisibleStoryM
                                             s = "";
                                         }
                                     } else {
-                                        s = n.getText();
+                                        s = reader.getCurrentElementContent();
                                     }
                                     currentStory.setDescription(currentStory.getDescription() + s);
                                 }
                                 currentStory.setDescription(StringEscapeUtils.unescapeHtml(currentStory.getDescription().trim()));
-                            } else if(tn.getTagName().equals("SPAN") && "likes".equals(tn.getAttribute("class"))) {
-                                currentStory.setLikes(Integer.parseInt(reader.nextNode().getText().replace(",", "")));
-                            } else if(tn.getTagName().equals("SPAN") && "dislikes".equals(tn.getAttribute("class"))) {
-                                currentStory.setDislikes(Integer.parseInt(reader.nextNode().getText().replace(",", "")));
-                            } else if(tn.getTagName().equals("DIV") && "comment_container".equals(tn.getAttribute("class"))) {
-                                while(!((n = reader.nextNode()) instanceof TextNode) || n.getText().trim().length() == 0)
+                            } else if(reader.getLowercaseTagName().equals("span") && "likes".equals(reader.getAttribute("class"))) {
+                                reader.getNext();
+                                currentStory.setLikes(Integer.parseInt(reader.getCurrentElementContent().replace(",", "")));
+                            } else if(reader.getLowercaseTagName().equals("span") && "dislikes".equals(reader.getAttribute("class"))) {
+                                reader.getNext();
+                                currentStory.setDislikes(Integer.parseInt(reader.getCurrentElementContent().replace(",", "")));
+                            } else if(reader.getLowercaseTagName().equals("div") && "comment_container".equals(reader.getAttribute("class"))) {
+                                while(reader.getNext() && (reader.isTag() || reader.getCurrentElementContent().trim().length() == 0))
                                     ;
-                                currentStory.setCommentAmount(Integer.parseInt(n.getText().trim().replace(",", "")));
-                            } else if(tn.getTagName().equals("DIV") && "left".equals(tn.getAttribute("class"))) {
-                                while(!((n = reader.nextNode()) instanceof TagNode))
+                                currentStory.setCommentAmount(Integer.parseInt(reader.getCurrentElementContent().trim().replace(",", "")));
+                            } else if(reader.getLowercaseTagName().equals("div") && "left".equals(reader.getAttribute("class"))) {
+                                while(reader.getNext() && !reader.isTag())
                                     ;
-                                currentStory.setFullImageLocation(((TagNode)n).getAttribute("href"));
-                                while(!((n = reader.nextNode()) instanceof TagNode))
+                                currentStory.setFullImageLocation(reader.getAttribute("href"));
+                                while(reader.getNext() && !reader.isTag())
                                     ;
-                                currentStory.setImageLocation(((TagNode)n).getAttribute("src"));
-                            } else if(tn.getTagName().equals("DIV") && "categories".equals(tn.getAttribute("class"))) {
+                                currentStory.setImageLocation(reader.getAttribute("src"));
+                            } else if(reader.getLowercaseTagName().equals("div") && "categories".equals(reader.getAttribute("class"))) {
                                 final List<Category> categories = new ArrayList<Category>(5);
                                 while(true) {
-                                    n = reader.nextNode();
-                                    if(n instanceof TagNode)
-                                        if(((TagNode)n).getTagName().equals("DIV"))
+                                    reader.getNext();
+                                    if(reader.isTag())
+                                        if(reader.getLowercaseTagName().equals("div"))
                                             break;
                                         else {
-                                            final String c = reader.nextNode().getText();
-                                            if(c.trim().length() > 0) {
+                                            reader.getNext();
+                                            final String c = reader.getCurrentElementContent().trim();
+                                            if(c.length() > 0) {
                                                 for(Category ca : Category.values())
                                                     if(ca.getName().equalsIgnoreCase(c)) {
                                                         categories.add(ca);
@@ -142,57 +133,60 @@ public class MetaSearchIterator extends SearchIterator<StoryAccess<VisibleStoryM
                                         }
                                 }
                                 currentStory.setCategories(categories.toArray(new Category[categories.size()]));
-                                while(!((n = reader.nextNode()) instanceof TextNode) || n.getText().trim().isEmpty())
+                                while(reader.getNext() && (reader.isTag() || reader.getCurrentElementContent().trim().isEmpty()))
                                     ;
-                                currentStory.setMaximumChapterViews(Integer.parseInt(n.getText().substring(0, n.getText().indexOf('(')).trim().replace(",", "")));
-                                currentStory.setTotalViews(Integer.parseInt(n.getText().substring(n.getText().indexOf('(') + 1, n.getText().indexOf(')')).trim().replace(",", "")));
-                            } else if(tn.getTagName().equals("UL") && "chapters".equals(tn.getAttribute("class"))) {
+                                currentStory.setMaximumChapterViews(Integer.parseInt(reader.getCurrentElementContent().substring(0, reader.getCurrentElementContent().indexOf('(')).trim().replace(",", "")));
+                                currentStory.setTotalViews(Integer.parseInt(reader.getCurrentElementContent().substring(reader.getCurrentElementContent().indexOf('(') + 1, reader.getCurrentElementContent().indexOf(')')).trim().replace(",", "")));
+                            } else if(reader.getLowercaseTagName().equals("ul") && "chapters".equals(reader.getAttribute("class"))) {
                                 String title = null;
                                 int words = -1;
                                 int id = -1;
                                 final List<Chapter> chapters = new ArrayList<Chapter>();
                                 while(true) {
-                                    n = reader.nextNode();
-                                    if(n instanceof TagNode && "save_ordering".equals(((TagNode)n).getAttribute("class")))
+                                    reader.getNext();
+                                    if(reader.isTag() && "save_ordering".equals(reader.getAttribute("class")))
                                         break;
-                                    else if(n instanceof TagNode && ((TagNode)n).getTagName().equals("LI") && ((TagNode)n).isEndTag())
+                                    else if(reader.isTag() && reader.getLowercaseTagName().equals("li") && reader.isEndTagOnly())
                                         chapters.add(new SimpleChapter(id, title, words, -1, null));
-                                    else if(n instanceof TagNode && ((TagNode)n).getTagName().equals("DIV") && "word_count".equals(((TagNode)n).getAttribute("class")))
-                                        words = Integer.parseInt(reader.nextNode().getText().replaceAll("[^0-9]", ""));
-                                    else if(n instanceof TagNode && ((TagNode)n).getTagName().equals("DIV") && "download_container".equals(((TagNode)n).getAttribute("class"))) {
-                                        while(!((n = reader.nextNode()) instanceof TagNode) || !((TagNode)n).getTagName().equals("A"))
+                                    else if(reader.isTag() && reader.getLowercaseTagName().equals("div") && "word_count".equals(reader.getAttribute("class"))) {
+                                        reader.getNext();
+                                        words = Integer.parseInt(reader.getCurrentElementContent().replaceAll("[^0-9]", ""));
+                                    } else if(reader.isTag() && reader.getLowercaseTagName().equals("div") && "download_container".equals(reader.getAttribute("class"))) {
+                                        while(reader.getNext() && (!reader.isTag() || !reader.getLowercaseTagName().equals("a")))
                                             ;
-                                        id = Integer.parseInt(((TagNode)n).getAttribute("href").substring(30));
-                                    } else if(n instanceof TagNode && ((TagNode)n).getTagName().equals("A") && "chapter_link".equals(((TagNode)n).getAttribute("class")))
-                                        title = StringEscapeUtils.unescapeHtml(reader.nextNode().getText());
+                                        id = Integer.parseInt(reader.getAttribute("href").substring(30));
+                                    } else if(reader.isTag() && reader.getLowercaseTagName().equals("a") && "chapter_link".equals(reader.getAttribute("class"))) {
+                                        reader.getNext();
+                                        title = StringEscapeUtils.unescapeHtml(reader.getCurrentElementContent().trim());
+                                    }
                                 }
                                 currentStory.setChapters(chapters.toArray(new Chapter[chapters.size()]));
-                                while(!((n = reader.nextNode()) instanceof TagNode) || !((TagNode)n).getTagName().equals("IMG") || !"//www.fimfiction-static.net/images/icons/epub.png".equals(((TagNode)n).getAttribute("src")))
+                                while(reader.getNext() && (!reader.isTag() || !reader.getLowercaseTagName().equals("img") || !"//www.fimfiction-static.net/images/icons/epub.png".equals(reader.getAttribute("src"))))
                                     ;
-                                while(!((n = reader.nextNode()) instanceof TextNode) || n.getText().trim().isEmpty())
+                                while(reader.getNext() && (reader.isTag() || reader.getCurrentElementContent().trim().isEmpty()))
                                     ;
                                 for(StoryStatus ss : StoryStatus.values())
-                                    if(ss.getName().equalsIgnoreCase(n.getText().trim())) {
+                                    if(ss.getName().equalsIgnoreCase(reader.getCurrentElementContent().trim())) {
                                         currentStory.setStoryStatus(ss);
                                         break;
                                     }
-                                while(!((n = reader.nextNode()) instanceof TagNode) || !((TagNode)n).getTagName().equals("SPAN"))
+                                while(reader.getNext() && (!reader.isTag() || !reader.getLowercaseTagName().equals("span")))
                                     ;
-                                n = reader.nextNode();
+                                reader.getNext();
                                 for(ContentRating cr : ContentRating.values())
-                                    if(cr.toString().equalsIgnoreCase(n.getText().trim())) {
+                                    if(cr.toString().equalsIgnoreCase(reader.getLowercaseTagName().trim())) {
                                         currentStory.setContentRating(cr);
                                         break;
                                     }
                                 while(true) {
-                                    while(!((n = reader.nextNode()) instanceof TagNode) || !((TagNode)n).getTagName().equals("B"))
+                                    while(reader.getNext() && (!reader.isTag() || !reader.getLowercaseTagName().equals("b")))
                                         ;
-                                    n = reader.nextNode();
-                                    if(n.getText().trim().equals("&#xb7;")) {
-                                        while(!((n = reader.nextNode()) instanceof TextNode) || n.getText().trim().isEmpty())
+                                    reader.getNext();
+                                    if(reader.getCurrentElementContent().trim().equals("&#xb7;")) {
+                                        while(reader.getNext() && (reader.isTag() || reader.getCurrentElementContent().trim().isEmpty()))
                                             ;
                                         for(MatureCategory mc : MatureCategory.values()) {
-                                            if(mc.toString().equalsIgnoreCase(n.getText().trim())) {
+                                            if(mc.toString().equalsIgnoreCase(reader.getCurrentElementContent().trim())) {
                                                 final MatureCategory[] ac = currentStory.getMatureCategories() == null ? new MatureCategory[1] : Arrays.copyOf(currentStory.getMatureCategories(), currentStory.getMatureCategories().length + 1);
                                                 ac[ac.length - 1] = mc;
                                                 currentStory.setMatureCategories(ac);
@@ -200,15 +194,15 @@ public class MetaSearchIterator extends SearchIterator<StoryAccess<VisibleStoryM
                                             }
                                         }
                                     } else {
-                                        currentStory.setWords(Integer.parseInt(n.getText().trim().replace(",", "")));
+                                        currentStory.setWords(Integer.parseInt(reader.getCurrentElementContent().trim().replace(",", "")));
                                         break;
                                     }
                                 }
-                            } else if(tn.getTagName().equals("A") && "character_icon pill_button pill_button_img_only".equals(tn.getAttribute("class"))) {
-                                while(!((n = reader.nextNode()) instanceof TagNode) || !((TagNode)n).getTagName().equals("IMG"))
+                            } else if(reader.getLowercaseTagName().equals("a") && "character_icon pill_button pill_button_img_only".equals(reader.getAttribute("class"))) {
+                                while(reader.getNext() && (!reader.isTag() || !reader.getLowercaseTagName().equals("img")))
                                     ;
                                 for(Character c : Character.values())
-                                    if(c.getImageLocation().equals("http:" + ((TagNode)n).getAttribute("src"))) {
+                                    if(c.getImageLocation().equals("http:" + reader.getAttribute("src"))) {
                                         final Character[] ac = currentStory.getCharacters() == null ? new Character[1] : Arrays.copyOf(currentStory.getCharacters(), currentStory.getCharacters().length + 1);
                                         ac[ac.length - 1] = c;
                                         currentStory.setCharacters(ac);
